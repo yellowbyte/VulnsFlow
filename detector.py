@@ -156,7 +156,7 @@ if __name__ == "__main__":
     if not addr_found:
         # free address not found
         exit(0)
-    # TODO: add delete or C++ variant to `dangling_creators`
+    # TODO: add C++ delete to `dangling_creators`
     dangling_creators = dict()
     dangling_creators["free"] = free_addr
 
