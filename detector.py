@@ -8,9 +8,9 @@ import os
 
 class VulnsDetector(FlowAnalysis):
 
-    def __init__(self, method, lib_methods=None):
+    def __init__(self, method, deallocation_methods=None):
         self.method = method
-        self.lib_methods = lib_methods
+        self.deallocation_methods = deallocation_methods
         self.alias = MayAlias(method)
         self.reporter = list()
         super().__init__(method.hlil, "forward")
@@ -26,8 +26,8 @@ class VulnsDetector(FlowAnalysis):
             ):
                 # callee is explicit
                 callee_addr = instr.dest.value.value
-                assert "free" in self.lib_methods.keys()
-                if callee_addr == self.lib_methods["free"]:
+                assert "free" in self.deallocation_methods.keys()
+                if callee_addr == self.deallocation_methods["free"]:
                     if (
                             len(instr.params) != 1 or
                             instr.params[0].operation.name != "HLIL_VAR"
@@ -156,14 +156,15 @@ if __name__ == "__main__":
     if not addr_found:
         # free address not found
         exit(0)
-    required_methods = dict()
-    required_methods["free"] = free_addr
+    # TODO: add delete or C++ variant to `dangling_creators`
+    dangling_creators = dict()
+    dangling_creators["free"] = free_addr
 
     for func in bv.functions:
         #        if func.name != "_main":
         #            continue
         print("    func:" + func.name)
-        vulns = VulnsDetector(func, required_methods)
+        vulns = VulnsDetector(func, dangling_creators)
         # output vulns identified
         if len(vulns.reporter) != 0:
             #            breakpoint()
