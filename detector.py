@@ -32,6 +32,7 @@ class VulnsDetector(FlowAnalysis):
                         callee_name == "operator delete[]" or
                         callee_name == "operator delete"
                 ):
+                    # callee is heap deallocation: free, delete, delete[]
                     if (
                             len(instr.params) != 1 or
                             instr.params[0].operation.name != "HLIL_VAR"
@@ -86,8 +87,15 @@ class VulnsDetector(FlowAnalysis):
 
                 if instr_dest.operation.name == "HLIL_VAR":
                     instr_dest_var = instr_dest.var
-                    if instr_dest_var in IN_wip.keys():
+                    if (
+                            instr_dest_var in IN_wip.keys() and
+                            instr_src.operation.name != "HLIL_CALL"
+                    ):
+                        # TODO: fix this part when considering program summaries
+                        # TODO: since the callee can either kill or keep the
+                        # TODO: dangling pointer
                         # KILL the var
+                        # lhs is a dataflow fact that is overwritten
                         del IN_wip[instr_dest_var]
             self.unitToAfterFlow[instr.instr_index] = IN_wip
 
@@ -162,6 +170,9 @@ if __name__ == "__main__":
                 break
         dangling_creators["free"] = free_addr
 
+    # TODO: traverse callgraph in RTO
+    # TODO: create function summaries
+    # TODO: create unit tests
     for func in bv.functions:
         #        if func.name != "_main":
         #            continue
