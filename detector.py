@@ -26,8 +26,12 @@ class VulnsDetector(FlowAnalysis):
             ):
                 # callee is explicit
                 callee_addr = instr.dest.value.value
-                assert "free" in self.deallocation_methods.keys()
-                if callee_addr == self.deallocation_methods["free"]:
+                callee_name = str(instr.dest)
+                if (
+                        callee_addr in self.deallocation_methods.values() or
+                        callee_name == "operator delete[]" or
+                        callee_name == "operator delete"
+                ):
                     if (
                             len(instr.params) != 1 or
                             instr.params[0].operation.name != "HLIL_VAR"
@@ -139,26 +143,24 @@ if __name__ == "__main__":
     print("apk: " + filename)
     output_file = open("target/" + filename + ".mono", "w")
     bv = binaryninja.load(filepath)
+
+    dangling_creators = dict()
     free_sym = "free"
     if free_sym not in bv.symbols:
         free_sym = "_free"
         if free_sym not in bv.symbols:
-            exit(0)
-    # identify the imported function address for free
-    free = bv.symbols[free_sym]
-    addr_found = False
-    free_addr = None
-    for sym in free:
-        if sym.type.name == "ImportedFunctionSymbol":
-            addr_found = True
-            free_addr = sym.address
-            break
-    if not addr_found:
-        # free address not found
-        exit(0)
-    # TODO: add C++ delete to `dangling_creators`
-    dangling_creators = dict()
-    dangling_creators["free"] = free_addr
+            free_sym = None
+    if free_sym:
+        # identify the imported function address for free
+        free = bv.symbols[free_sym]
+        addr_found = False
+        free_addr = None
+        for sym in free:
+            if sym.type.name == "ImportedFunctionSymbol":
+                addr_found = True
+                free_addr = sym.address
+                break
+        dangling_creators["free"] = free_addr
 
     for func in bv.functions:
         #        if func.name != "_main":
