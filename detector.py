@@ -170,9 +170,16 @@ if __name__ == "__main__":
                 break
         dangling_creators["free"] = free_addr
 
+    # TODO: create callgraph (OG)
+    # TODO: create on-demand callgraphs for functions not in callgraph (OG)
+    # TODO: - extend on-demand callgraph with callee if a dangling pointer flows into it
+    # TODO: - extend on-demand callgraph with callers if a dangling pointer is returned
+    # TODO: - combine overlapping on-demand callgraphs
+    # TODO: if on-demand callgraph overlaps with callgraph (OG), add to OG
+    # TODO: callgraph (OG) may have multiple entry points therefore
     # TODO: traverse callgraph in RTO
     # TODO: create function summaries
-    # TODO: create unit tests
+    # TODO: create unit tests and CI/CD
     for func in bv.functions:
         #        if func.name != "_main":
         #            continue
