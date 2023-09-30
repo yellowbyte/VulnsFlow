@@ -10,8 +10,10 @@ class Callgraph:
         self.view = view
         self.rootfunction = rootfunction
         self.leafs = set()
+        self.roots = set()
         self.not_leafs = set()
-        self.calls = {}  # dict containing callee -> set(callers)
+        self.callee2caller = dict()  # dict containing callee -> set(callers)
+        self.caller2callee = dict()  # dict containing caller -> set(callees)
         self.collect_calls()
 
     def collect_calls(self):
@@ -19,14 +21,19 @@ class Callgraph:
         for function in self.view.functions:
             if not self.is_user_defined(function):
                 continue
-            for ref in self.view.get_code_refs(function.start):
+            refs = [r for r in self.view.get_code_refs(function.start)]
+            if len(refs) == 0:
+                self.roots.add(function)
+            for ref in refs:
                 caller = ref.function
-                self.calls[function] = self.calls.get(function, set())
+                self.callee2caller[function] = self.callee2caller.get(function, set())
+                self.caller2callee[caller] = self.caller2callee.get(caller, set())
                 if function not in self.not_leafs:
                     self.leafs.add(function)
                 call_il = caller.get_low_level_il_at(ref.address)
                 if isinstance(call_il, Call) and isinstance(call_il.dest, Constant):
-                    self.calls[function].add(caller)
+                    self.callee2caller[function].add(caller)
+                    self.caller2callee[caller].add(function)
                     self.not_leafs.add(caller)
                     if caller in self.leafs:
                         self.leafs.remove(caller)
