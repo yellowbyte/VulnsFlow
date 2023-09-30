@@ -1,7 +1,8 @@
 from copy import deepcopy
-from core import FlowAnalysis, MayAlias
+from .core import FlowAnalysis, MayAlias
 
 import binaryninja
+import click
 import sys
 import os
 
@@ -143,13 +144,14 @@ class VulnsDetector(FlowAnalysis):
             )
 
 
-if __name__ == "__main__":
+def main(filepath, output_dir):
     # identify free from symbol table
     # if not in symbol table, the binary does not call free anywhere
-    filepath = sys.argv[1]
     filename = os.path.basename(filepath)
     print("apk: " + filename)
-    output_file = open("target/" + filename + ".mono", "w")
+    print("filepath: " + filepath)
+    output_file = os.path.join(output_dir, filename + ".mono")
+    output_file = open(output_file, "w")
     bv = binaryninja.load(filepath)
 
     dangling_creators = dict()
@@ -191,5 +193,15 @@ if __name__ == "__main__":
             for vuln in vulns.reporter:
                 output_file.write(vuln)
                 output_file.flush()
-
     output_file.close()
+
+
+@click.command()
+@click.argument('filepath', type=click.Path(exists=True))
+@click.argument('output_dir', default="target")
+def cli(filepath, output_dir):
+    main(filepath, output_dir)
+
+
+if __name__ == "__main__":
+    cli()

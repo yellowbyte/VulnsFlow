@@ -1,6 +1,6 @@
 from copy import deepcopy
 
-from core import FlowAnalysis
+from . import FlowAnalysis
 
 
 class MayAlias(FlowAnalysis):
