@@ -7,12 +7,10 @@ import binaryninja
 import click
 import os
 
-
 Summary = namedtuple("Summary", ["args_free", "args_use", "ret_free"])
 
 
 class VulnsDetector(core.FlowAnalysis):
-
     func_summaries = dict()
 
     def __init__(self, method, deallocation_methods=None):
@@ -64,19 +62,7 @@ class VulnsDetector(core.FlowAnalysis):
                     self.update_IN(instr, free_var, IN_wip)
                 else:
                     # other calls
-                    for param in instr.params:
-                        if param.operation.name != "HLIL_VAR":
-                            continue
-                        if param.var.name in IN_wip.keys():
-                            self.update_reporter(instr, param.var, IN_wip,
-                                                 "use-after-free")
-                        elif len(IN_wip) != 0:
-                            # alias query of free_var with each dataflow fact in IN_wip
-                            for in_var in IN_wip.keys():
-                                if self.alias.is_alias(param.var.name, in_var,
-                                                       instr.instr_index):
-                                    self.update_reporter(instr, param.var, IN_wip,
-                                                         "double_free", True)
+                    self.handle_params(instr, IN_wip)
 
             elif instr.operation.name == "HLIL_ASSIGN":
                 instr_src = instr.src
@@ -92,6 +78,9 @@ class VulnsDetector(core.FlowAnalysis):
                                                        instr.instr_index):
                                     self.update_reporter(instr, var, IN_wip,
                                                          "double_free", True)
+                elif instr_src.operation.name == "HLIL_CALL":
+                    # rhs is a call instruction
+                    self.handle_params(instr_src, IN_wip)
 
                 if instr_dest.operation.name == "HLIL_VAR":
                     instr_dest_var = instr_dest.var
@@ -109,6 +98,23 @@ class VulnsDetector(core.FlowAnalysis):
 
         OUT = IN_wip
         return OUT
+
+    def handle_params(self, instr, IN_wip):
+        for param in instr.params:
+            if param.operation.name != "HLIL_VAR":
+                continue
+            if param.var.name in IN_wip.keys():
+                # param is free'd already
+                self.update_reporter(instr, param.var, IN_wip,
+                                     "use-after-free")
+            elif len(IN_wip) != 0:
+                # alias query of free_var with each dataflow fact in IN_wip
+                # check if param's alias is free'd already
+                for in_var in IN_wip.keys():
+                    if self.alias.is_alias(param.var.name, in_var,
+                                           instr.instr_index):
+                        self.update_reporter(instr, param.var, IN_wip,
+                                             "double_free", True)
 
     @staticmethod
     def update_IN(instr, var, IN):
@@ -130,7 +136,6 @@ class VulnsDetector(core.FlowAnalysis):
         out2 = deepcopy(in2)
         # MAY analysis
         return out1 | out2
-
 
     def update_reporter(self, instr, var, IN, vuln_type, isAlias=False):
         """Track the detected UAF or DF"""
