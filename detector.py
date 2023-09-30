@@ -149,8 +149,7 @@ def main(filepath, output_dir):
     # identify free from symbol table
     # if not in symbol table, the binary does not call free anywhere
     filename = os.path.basename(filepath)
-    print("apk: " + filename)
-    print("filepath: " + filepath)
+    print(f"apkpath: {filepath}, apkname: {filename}")
     output_filepath = os.path.join(output_dir, filename + ".mono")
     output_file = open(output_filepath, "w")
     bv = binaryninja.load(filepath)
@@ -171,18 +170,20 @@ def main(filepath, output_dir):
                 break
         dangling_creators["free"] = free_addr
 
-    # TODO: create callgraph (OG)
-    # TODO: create on-demand callgraphs for functions not in callgraph (OG)
-    # TODO: - extend on-demand callgraph with callee if a dangling pointer flows into it
-    # TODO: - extend on-demand callgraph with callers if a dangling pointer is returned
-    # TODO: - combine overlapping on-demand callgraphs
-    # TODO: if on-demand callgraph overlaps with callgraph (OG), add to OG
-    # TODO: callgraph (OG) may have multiple entry points therefore
-    # TODO: traverse callgraph in RTO
+    # create callgraph (OG)
+    # NO: create on-demand callgraphs for functions not in callgraph (OG)
+    # NO: - extend on-demand callgraph with callee if a dangling pointer flows into it
+    # NO: - extend on-demand callgraph with callers if a dangling pointer is returned
+    # NO: - combine overlapping on-demand callgraphs
+    # NO: if on-demand callgraph overlaps with callgraph (OG), add to OG
+    # NO: callgraph (OG) may have multiple entry points therefore
+    # traverse callgraph in RTO
     # TODO: create function summaries
     # create unit tests and CI/CD
     vuln_lines = set()
-    for func in bv.functions:
+    cg = core.Callgraph(bv)
+    rto = core.rto_traversal(cg)
+    for func in rto:
         #        if func.name != "_main":
         #            continue
         print("    func:" + func.name)

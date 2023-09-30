@@ -39,12 +39,11 @@ class Callgraph:
                     if caller in self.leafs:
                         self.leafs.remove(caller)
 
-    @staticmethod
-    def is_user_defined(function):
+    def is_user_defined(self, function):
         func_name = function.name
-        if func_name in bv.symbols:
+        if func_name in self.view.symbols:
             # function name is in imported symbols
-            symbols = bv.symbols[func_name]
+            symbols = self.view.symbols[func_name]
             for sym in symbols:
                 if (
                         sym.type == SymbolType.DataSymbol or
