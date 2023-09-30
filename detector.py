@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from copy import deepcopy
+from collections import namedtuple
 
 import core
 import binaryninja
@@ -7,7 +8,12 @@ import click
 import os
 
 
+Summary = namedtuple("Summary", ["args_free", "args_use", "ret_free"])
+
+
 class VulnsDetector(core.FlowAnalysis):
+
+    func_summaries = dict()
 
     def __init__(self, method, deallocation_methods=None):
         self.method = method
@@ -125,6 +131,7 @@ class VulnsDetector(core.FlowAnalysis):
         # MAY analysis
         return out1 | out2
 
+
     def update_reporter(self, instr, var, IN, vuln_type, isAlias=False):
         """Track the detected UAF or DF"""
         if isAlias:
@@ -145,15 +152,9 @@ class VulnsDetector(core.FlowAnalysis):
             )
 
 
-def main(filepath, output_dir):
+def get_danglers(bv):
     # identify free from symbol table
     # if not in symbol table, the binary does not call free anywhere
-    filename = os.path.basename(filepath)
-    print(f"apkpath: {filepath}, apkname: {filename}")
-    output_filepath = os.path.join(output_dir, filename + ".mono")
-    output_file = open(output_filepath, "w")
-    bv = binaryninja.load(filepath)
-
     dangling_creators = dict()
     free_sym = "free"
     if free_sym not in bv.symbols:
@@ -169,7 +170,17 @@ def main(filepath, output_dir):
                 free_addr = sym.address
                 break
         dangling_creators["free"] = free_addr
+    return dangling_creators
 
+
+def main(filepath, output_dir):
+    filename = os.path.basename(filepath)
+    print(f"apkpath: {filepath}, apkname: {filename}")
+    output_filepath = os.path.join(output_dir, filename + ".mono")
+    output_file = open(output_filepath, "w")
+    bv = binaryninja.load(filepath)
+
+    dangling_creators = get_danglers(bv)
     # create callgraph (OG)
     # NO: create on-demand callgraphs for functions not in callgraph (OG)
     # NO: - extend on-demand callgraph with callee if a dangling pointer flows into it
@@ -186,7 +197,7 @@ def main(filepath, output_dir):
     for func in rto:
         #        if func.name != "_main":
         #            continue
-        print("    func:" + func.name)
+        print(f"    func({hex(func.start)}): {func.name}")
         vulns = VulnsDetector(func, dangling_creators)
         # output vulns identified
         if len(vulns.reporter) != 0:
