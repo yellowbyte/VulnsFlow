@@ -20,3 +20,6 @@ free(msg);
 
 need\_alias.out:
 * requires alias analysis to detect the double-free
+
+cpp1.out:
+* double-free with cpp delete
