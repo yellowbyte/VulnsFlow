@@ -182,7 +182,7 @@ def main(filepath, output_dir):
     # TODO: callgraph (OG) may have multiple entry points therefore
     # TODO: traverse callgraph in RTO
     # TODO: create function summaries
-    # TODO: create unit tests and CI/CD
+    # create unit tests and CI/CD
     for func in bv.functions:
         #        if func.name != "_main":
         #            continue
