@@ -1,18 +1,19 @@
+#!/usr/bin/env python3
 from copy import deepcopy
-from .core import FlowAnalysis, MayAlias
 
+import core
 import binaryninja
 import click
 import sys
 import os
 
 
-class VulnsDetector(FlowAnalysis):
+class VulnsDetector(core.FlowAnalysis):
 
     def __init__(self, method, deallocation_methods=None):
         self.method = method
         self.deallocation_methods = deallocation_methods
-        self.alias = MayAlias(method)
+        self.alias = core.MayAlias(method)
         self.reporter = list()
         super().__init__(method.hlil, "forward")
 
