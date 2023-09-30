@@ -1,109 +1,33 @@
 from binaryninja import *
+
 import ctypes
+import sys
 
 
-class CallgraphTask(BackgroundTaskThread):
+class Callgraph:
 
     def __init__(self, view, rootfunction=None):
-        super(CallgraphTask, self).__init__('Generating callgraph...')
         self.view = view
         self.rootfunction = rootfunction
+        self.leafs = set()
+        self.calls = {}  # dict containing callee -> set(callers)
+        self.collect_calls()
 
-    def run(self):
-        collect_calls(self.view, self.rootfunction)
+    def collect_calls(self):
 
-
-def get_or_set_call_node(callgraph, function_nodes, function):
-    # create a new node if one doesn't exist already
-    if function not in function_nodes:
-        node = FlowGraphNode(callgraph)
-
-        function_nodes[function] = node
-
-        if function.symbol.type == SymbolType.ImportedFunctionSymbol:
-            token_type = InstructionTextTokenType.ImportToken
-        else:
-            token_type = InstructionTextTokenType.CodeSymbolToken
-
-        # Set the node's text to be the name of the function
-        node.lines = [
-            DisassemblyTextLine(
-                [
-                    InstructionTextToken(
-                        token_type,
-                        function.name,
-                        function.start
-                    )
-                ]
-            )
-        ]
-
-        callgraph.append(node)
-    else:
-        node = function_nodes[function]
-
-    return node
+        for function in self.view.functions:
+            for ref in self.view.get_code_refs(function.start):
+                caller = ref.function
+                self.calls[function] = self.calls.get(function, set())
+                self.leafs.add(function)
+                call_il = caller.get_low_level_il_at(ref.address)
+                if isinstance(call_il, Call) and isinstance(call_il.dest, Constant):
+                    self.calls[function].add(caller)
+                    self.leaf.remove(caller)
 
 
-def collect_calls(view, rootfunction):
-    # dict containing callee -> set(callers)
-    calls = {}
-    if (rootfunction == None):
-        functions = view.functions
-        rootlines = ['ROOT']
-    else:
-        functions = map(lambda x: x.function, view.get_code_refs(rootfunction.start))
-        rootlines = [rootfunction.name]
-
-    for function in view.functions:
-        for ref in view.get_code_refs(function.start):
-            caller = ref.function
-            calls[function] = calls.get(function, set())
-
-            call_il = caller.get_low_level_il_at(ref.address)
-            if isinstance(call_il, Call) and isinstance(call_il.dest, Constant):
-                calls[function].add(caller)
-
-    callgraph = FlowGraph()
-    callgraph.function = view.get_function_at(view.entry_point)
-    root_node = FlowGraphNode(callgraph)
-    root_node.lines = rootlines
-    callgraph.append(root_node)
-    function_nodes = {}
-
-    for callee in view.functions:
-        # create a new node if one doesn't exist already
-        callee_node = get_or_set_call_node(callgraph, function_nodes, callee)
-
-        # create nodes for the callers, and add edges
-        callers = calls.get(callee, set())
-
-        if not callers:
-            root_node.add_outgoing_edge(
-                BranchType.FalseBranch, callee_node
-            )
-
-        for caller in callers:
-            caller_node = get_or_set_call_node(callgraph, function_nodes, caller)
-
-            # Add the edge between the caller and the callee
-            if ctypes.addressof(callee_node.handle.contents) not in [
-                ctypes.addressof(edge.target.handle.contents)
-                for edge in caller_node.outgoing_edges]:
-                caller_node.add_outgoing_edge(
-                    BranchType.TrueBranch,
-                    callee_node
-                )
-
-    callgraph.layout_and_wait()
-    callgraph.show('Callgraph')
-
-
-def generate_callgraph(view):
-    callgraph_task = CallgraphTask(view)
-    callgraph_task.start()
-
-# def generate_callersgraph(view, function):
-#    log_info("generate_callersgraph")
-#    callgraph_task = CallgraphTask(view, function)
-#    callgraph_task.start()
+if __name__ == "__main__":
+    filepath = sys.argv[1]
+    bv = binaryninja.load(filepath)
+    cg = Callgraph(bv)
+    breakpoint()

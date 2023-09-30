@@ -64,3 +64,18 @@ def test_need_alias(tmpdir):
         print(out)
         for o, e in zip(out, expected):
             assert o == e
+
+def test_cpp1(tmpdir):
+    folder = tmpdir
+    filepath = os.path.join(os.getcwd(), "tests/programs/cpp1.out")
+    detector.main(filepath, folder)
+    output_file = os.path.join(folder, "cpp1.out.mono")
+    expected = [
+        "double_free,_main,82,0x100003088\n",
+    ]
+    with open(output_file, "r") as f:
+        out = f.readlines()
+        assert len(out) != 0
+        print(out)
+        for o, e in zip(out, expected):
+            assert o == e

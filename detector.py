@@ -151,8 +151,8 @@ def main(filepath, output_dir):
     filename = os.path.basename(filepath)
     print("apk: " + filename)
     print("filepath: " + filepath)
-    output_file = os.path.join(output_dir, filename + ".mono")
-    output_file = open(output_file, "w")
+    output_filepath = os.path.join(output_dir, filename + ".mono")
+    output_file = open(output_filepath, "w")
     bv = binaryninja.load(filepath)
 
     dangling_creators = dict()
@@ -164,11 +164,9 @@ def main(filepath, output_dir):
     if free_sym:
         # identify the imported function address for free
         free = bv.symbols[free_sym]
-        addr_found = False
         free_addr = None
         for sym in free:
             if sym.type.name == "ImportedFunctionSymbol":
-                addr_found = True
                 free_addr = sym.address
                 break
         dangling_creators["free"] = free_addr
@@ -183,6 +181,7 @@ def main(filepath, output_dir):
     # TODO: traverse callgraph in RTO
     # TODO: create function summaries
     # create unit tests and CI/CD
+    vuln_lines = set()
     for func in bv.functions:
         #        if func.name != "_main":
         #            continue
@@ -192,8 +191,12 @@ def main(filepath, output_dir):
         if len(vulns.reporter) != 0:
             # breakpoint()
             for vuln in vulns.reporter:
-                output_file.write(vuln)
-                output_file.flush()
+                vuln_lines.add(vuln)
+
+    # write to file unique findings
+    for vuln in vuln_lines:
+        output_file.write(vuln)
+        output_file.flush()
     output_file.close()
 
 
