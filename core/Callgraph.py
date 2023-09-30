@@ -1,4 +1,5 @@
 from binaryninja import *
+from pprint import pprint
 
 import ctypes
 import sys
@@ -54,8 +55,27 @@ class Callgraph:
         return False
 
 
+def rto_traversal(cg):
+    topological_order = list()
+    wip_funcs = set()
+    for func in cg.roots:
+        wip_funcs.add(func)
+        while len(wip_funcs) != 0:
+            curr_func = wip_funcs.pop()
+            if curr_func not in topological_order:
+                topological_order.append(curr_func)
+                if curr_func in cg.caller2callee:
+                    for callee in cg.caller2callee[curr_func]:
+                        wip_funcs.add(callee)
+
+    # reverse topological ordering list to get reverse topological ordering
+    return topological_order[::-1]
+
+
 if __name__ == "__main__":
     filepath = sys.argv[1]
     bv = binaryninja.load(filepath)
     cg = Callgraph(bv)
+    rto = rto_traversal(cg)
+    pprint([f.name for f in rto])
     breakpoint()
