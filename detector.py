@@ -4,7 +4,6 @@ from copy import deepcopy
 import core
 import binaryninja
 import click
-import sys
 import os
 
 
@@ -14,6 +13,7 @@ class VulnsDetector(core.FlowAnalysis):
         self.method = method
         self.deallocation_methods = deallocation_methods
         self.alias = core.MayAlias(method)
+        # self.alias = core.DefaultAlias()
         self.reporter = list()
         super().__init__(method.hlil, "forward")
 
@@ -108,9 +108,9 @@ class VulnsDetector(core.FlowAnalysis):
     def update_IN(instr, var, IN):
         """Update dataflow facts"""
         if var.name in IN.keys():
-            IN[var.name].append(instr.instr_index)
+            IN[var.name].add(instr.instr_index)
         else:
-            IN[var.name] = [instr.instr_index]
+            IN[var.name] = {instr.instr_index}
 
     @staticmethod
     def new_initial_flow():
@@ -190,7 +190,7 @@ def main(filepath, output_dir):
         vulns = VulnsDetector(func, dangling_creators)
         # output vulns identified
         if len(vulns.reporter) != 0:
-            #            breakpoint()
+            # breakpoint()
             for vuln in vulns.reporter:
                 output_file.write(vuln)
                 output_file.flush()

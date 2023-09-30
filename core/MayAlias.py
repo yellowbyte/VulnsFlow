@@ -92,3 +92,13 @@ class MayAlias(FlowAnalysis):
                 return True
         # var1 and var2 do not alias
         return False
+
+
+class DefaultAlias:
+
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def is_alias(var1, var2, instr_index):
+        return False
