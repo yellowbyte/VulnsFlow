@@ -77,10 +77,13 @@ class VulnsDetector(core.FlowAnalysis):
                         del IN_wip[instr_dest_var]
             elif instr.operation.name == "HLIL_RET":
                 # check return instruction for summary
+                # update self.ret_free_sum if return value in IN_wip
                 self.update_ret_free_sum(instr, IN_wip)
                 if len(instr.src) == 1:
                     instr_src = instr.src[0]
                     if instr_src.operation.name == "HLIL_CALL":
+                        if self.is_free(instr_src):
+                            self.ret_free_sum = True
                         IN_wip = self.handle_call(instr_src, IN_wip)
 
             self.unitToAfterFlow[instr.instr_index] = IN_wip
@@ -89,19 +92,7 @@ class VulnsDetector(core.FlowAnalysis):
         return OUT
 
     def handle_call(self, instr, IN_wip):
-        callee_addr = instr.dest.value.value
-        callee_name = str(instr.dest)
-        if (
-                callee_addr in self.deallocation_methods.values() or
-                callee_name == "operator delete[]" or
-                callee_name == "operator delete"
-        ):
-            # callee is heap deallocation: free, delete, delete[]
-            if (
-                    len(instr.params) != 1 or
-                    instr.params[0].operation.name != "HLIL_VAR"
-            ):
-                return
+        if self.is_free(instr):
             # callee is free()
             free_var = instr.params[0].var
             self.update_args_free_sum(free_var)
@@ -159,6 +150,25 @@ class VulnsDetector(core.FlowAnalysis):
                 self.ret_free_sum = True
                 return
         return
+
+    def is_free(self, instr):
+        callee_addr = instr.dest.value.value
+        callee_name = str(instr.dest)
+        if (
+                callee_addr in self.deallocation_methods.values() or
+                callee_name == "operator delete[]" or
+                callee_name == "operator delete"
+        ):
+            # callee is heap deallocation: free, delete, delete[]
+            if (
+                    len(instr.params) != 1 or
+                    instr.params[0].operation.name != "HLIL_VAR"
+            ):
+                # happen to have same name as a deallocation method
+                return False
+            return True
+        # function name not a deallocation name
+        return False
 
     @staticmethod
     def update_IN(instr, var, IN):
@@ -236,7 +246,7 @@ def main(filepath, output_dir):
     # NO: if on-demand callgraph overlaps with callgraph (OG), add to OG
     # NO: callgraph (OG) may have multiple entry points therefore
     # traverse callgraph in RTO
-    # TODO: create function summaries
+    # create function summaries
     # create unit tests and CI/CD
     vuln_lines = set()
     cg = core.Callgraph(bv)
@@ -246,7 +256,7 @@ def main(filepath, output_dir):
         #     continue
         print(f"    func({hex(func.start)}): {func.name}")
         vulns = VulnsDetector(func, dangling_creators)
-        breakpoint()
+        # breakpoint()
         # output vulns identified
         if len(vulns.reporter) != 0:
             # breakpoint()
