@@ -3,7 +3,7 @@ from copy import deepcopy
 from . import FlowAnalysis
 
 
-class MayAlias(FlowAnalysis):
+class MayAlias(FlowAnalysis):  # type: ignore
 
     def __init__(self, method):
         super().__init__(method.hlil, "forward")

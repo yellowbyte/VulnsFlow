@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from copy import deepcopy
 from collections import namedtuple
+from typing import cast, Dict
 
 import core
 import binaryninja
@@ -12,19 +13,19 @@ Summary = namedtuple("Summary", ["args_use", "args_free", "ret_free"])
 
 
 class VulnsDetector(core.FlowAnalysis):
-    func_summaries = dict()
+    func_summaries: Dict[binaryninja.function.Function, Summary] = dict()
 
     def __init__(self, method, deallocation_methods=None):
-        self.method = method
-        self.deallocation_methods = deallocation_methods
+        self.method: binaryninja.function.Function = method
+        self.deallocation_methods: Dict[str, int] = deallocation_methods
         self.alias = core.MayAlias(method)
         # self.alias = core.DefaultAlias()
-        self.reporter = list()
+        self.reporter: list = list()
         # list of binaryninja.variable.Variable
-        self.args = self.method.parameter_vars.vars
-        self.args_use_sum = [False] * len(self.args)   # False: none, True: use
-        self.args_free_sum = [False] * len(self.args)  # False: none, True: free
-        self.ret_free_sum = False  # False: none, True: free
+        self.args: list[binaryninja.variable.Variable] = self.method.parameter_vars.vars
+        self.args_use_sum: list[bool] = [False] * len(self.args)   # False: none, True: use
+        self.args_free_sum: list[bool] = [False] * len(self.args)  # False: none, True: free
+        self.ret_free_sum: bool = False  # False: none, True: free
         super().__init__(method.hlil, "forward")
         VulnsDetector.func_summaries[method] = Summary(
             self.args_use_sum,
@@ -34,14 +35,15 @@ class VulnsDetector(core.FlowAnalysis):
 
     def flow_through(self, bb, IN):
         """Fact-affecting flow functions for UAF and DF detections"""
-        IN_wip = deepcopy(IN)
+        IN_wip: Dict[str, set[int]] = deepcopy(IN)
         for instr in bb:
             self.unitToBeforeFlow[instr.instr_index] = IN_wip
             if (
                     instr.operation.name == "HLIL_CALL" and
+                    # explicit callee
                     instr.dest.value.type.name == "ConstantPointerValue"
             ):
-                # callee is explicit
+                instr = cast(binaryninja.highlevelil.HighLevelILCall, instr)
                 IN_wip = self.handle_call(instr, IN_wip)
             elif instr.operation.name == "HLIL_ASSIGN":
                 instr_src = instr.src
@@ -61,6 +63,7 @@ class VulnsDetector(core.FlowAnalysis):
                                                          "double_free", True)
                 elif instr_src.operation.name == "HLIL_CALL":
                     # rhs is a call instruction
+                    instr = cast(binaryninja.highlevelil.HighLevelILCall, instr)
                     IN_wip = self.handle_call(instr_src, IN_wip)
                 # handle instr_dest
                 if instr_dest.operation.name == "HLIL_VAR":
@@ -84,6 +87,8 @@ class VulnsDetector(core.FlowAnalysis):
                     if instr_src.operation.name == "HLIL_CALL":
                         if self.is_free(instr_src):
                             self.ret_free_sum = True
+                        instr = cast(binaryninja.highlevelil.HighLevelILCall,
+                                            instr)
                         IN_wip = self.handle_call(instr_src, IN_wip)
 
             self.unitToAfterFlow[instr.instr_index] = IN_wip
@@ -91,10 +96,19 @@ class VulnsDetector(core.FlowAnalysis):
         OUT = IN_wip
         return OUT
 
-    def handle_call(self, instr, IN_wip):
+    def handle_call(
+            self, instr: binaryninja.highlevelil.HighLevelILCall,
+            IN_wip: Dict[str, set[int]]
+    ) -> Dict[str, set[int]]:
         if self.is_free(instr):
             # callee is free()
-            free_var = instr.params[0].var
+            instr_params: list[binaryninja.highlevelil.HighLevelILInstruction] = (
+                instr.params
+            )
+            instr_param: binaryninja.highlevelil.HighLevelILVar = (
+                cast(binaryninja.highlevelil.HighLevelILVar, instr_params[0])
+            )
+            free_var: binaryninja.variable.Variable = instr_param.var
             self.update_args_free_sum(free_var)
             if free_var.name in IN_wip.keys():
                 self.update_reporter(instr, free_var, IN_wip, "double_free")
@@ -115,8 +129,12 @@ class VulnsDetector(core.FlowAnalysis):
             self.handle_other_call(instr, IN_wip)
         return IN_wip
 
-    def handle_other_call(self, instr, IN_wip):
+    def handle_other_call(
+            self, instr: binaryninja.highlevelil.HighLevelILCall,
+            IN_wip: Dict[str, set[int]]
+    ) -> None:
         for param in instr.params:
+            param = cast(binaryninja.highlevelil.HighLevelILVar, param)
             if param.operation.name != "HLIL_VAR":
                 continue
             self.update_args_use_sum(param.var)
@@ -133,25 +151,27 @@ class VulnsDetector(core.FlowAnalysis):
                         self.update_reporter(instr, param.var, IN_wip,
                                              "double_free", True)
 
-    def update_args_use_sum(self, _var):
+    def update_args_use_sum(self, _var: binaryninja.variable.Variable) -> None:
         if _var in self.args:
             arg_index = self.args.index(_var)
             self.args_use_sum[arg_index] = True
 
-    def update_args_free_sum(self, _var):
+    def update_args_free_sum(self, _var: binaryninja.variable.Variable) -> None:
         if _var in self.args:
             arg_index = self.args.index(_var)
             self.args_free_sum[arg_index] = True
 
-    def update_ret_free_sum(self, instr, IN_wip):
+    def update_ret_free_sum(
+            self, instr: binaryninja.highlevelil.HighLevelILRet,
+            IN_wip: Dict[str, set[int]]
+    ) -> None:
         for var in instr.vars:
             if var.name in IN_wip.keys():
                 # return value is free'd
                 self.ret_free_sum = True
-                return
-        return
+                break
 
-    def is_free(self, instr):
+    def is_free(self, instr: binaryninja.highlevelil.HighLevelILCall) -> bool:
         callee_addr = instr.dest.value.value
         callee_name = str(instr.dest)
         if (
@@ -171,7 +191,10 @@ class VulnsDetector(core.FlowAnalysis):
         return False
 
     @staticmethod
-    def update_IN(instr, var, IN):
+    def update_IN(
+            instr: binaryninja.highlevelil.HighLevelILInstruction,
+            var: binaryninja.variable.Variable, IN: Dict[str, set[int]]
+    ) -> None:
         """Update dataflow facts"""
         if var.name in IN.keys():
             IN[var.name].add(instr.instr_index)
@@ -179,7 +202,7 @@ class VulnsDetector(core.FlowAnalysis):
             IN[var.name] = {instr.instr_index}
 
     @staticmethod
-    def new_initial_flow():
+    def new_initial_flow() -> Dict:
         """Initial dataflow container which is a dict"""
         return dict()
 
@@ -191,7 +214,11 @@ class VulnsDetector(core.FlowAnalysis):
         # MAY analysis
         return out1 | out2
 
-    def update_reporter(self, instr, var, IN, vuln_type, isAlias=False):
+    def update_reporter(
+            self, instr: binaryninja.highlevelil.HighLevelILInstruction,
+            var: binaryninja.variable.Variable, IN: Dict[str, set[int]],
+            vuln_type: str, isAlias=False
+    ) -> None:
         """Track the detected UAF or DF"""
         if isAlias:
             self.reporter.append(
@@ -211,8 +238,8 @@ class VulnsDetector(core.FlowAnalysis):
             )
 
 
-def get_danglers(bv):
-    # identify free from symbol table
+def get_danglers(bv: binaryninja.binaryview.BinaryView) -> Dict[str, int]:
+    """identify deallocation methods that create dangling ptr from symbol table"""
     # if not in symbol table, the binary does not call free anywhere
     dangling_creators = dict()
     free_syms = ["free", "_free"]
@@ -221,12 +248,15 @@ def get_danglers(bv):
         if free_sym in bv.symbols:
             # identify the imported function address for free
             free = bv.symbols[free_sym]
+            if free is None:
+                continue
             free_addr = None
             for sym in free:
                 if sym.type.name == "ImportedFunctionSymbol":
                     free_addr = sym.address
                     break
-            dangling_creators[free_sym] = free_addr
+            if isinstance(free_addr, int):
+                dangling_creators[free_sym] = free_addr
     return dangling_creators
 
 
