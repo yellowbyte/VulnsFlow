@@ -152,9 +152,12 @@ class VulnsDetector(core.FlowAnalysis):
                 callee_params = callee_func.parameter_vars.vars
                 for i, arg_is_free in enumerate(callee_sum.args_free):
                     if arg_is_free:
-                        self.gen_IN(instr, callee_params[i], IN_wip)
-                        self.check_reporter(instr, callee_params[i],
-                                            IN_wip, "double-free")
+                        instr_param = instr.params[i]
+                        if isinstance(instr_param,
+                                      binaryninja.highlevelil.HighLevelILVar):
+                            self.gen_IN(instr, instr_param.var, IN_wip)
+                            self.check_reporter(instr, callee_params[i],
+                                                IN_wip, "double-free")
 
         # over-approximate. If IN_wip overlaps with params, alert
         for param in instr.params:
