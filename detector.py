@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from copy import deepcopy
 from collections import namedtuple
-from typing import cast, Dict
+from typing import cast, Dict, Optional
 
 import core
 import binaryninja
@@ -15,8 +15,12 @@ Summary = namedtuple("Summary", ["args_use", "args_free", "ret_free"])
 class VulnsDetector(core.FlowAnalysis):
     func_summaries: Dict[binaryninja.function.Function, Summary] = dict()
 
-    def __init__(self, method, deallocation_methods=None):
+    def __init__(
+            self, method, bv: binaryninja.binaryview.BinaryView,
+            deallocation_methods=None
+    ):
         self.method: binaryninja.function.Function = method
+        self.bv: binaryninja.binaryview.BinaryView = bv
         self.deallocation_methods: Dict[str, int] = deallocation_methods
         self.alias = core.MayAlias(method)
         # self.alias = core.DefaultAlias()
@@ -60,11 +64,16 @@ class VulnsDetector(core.FlowAnalysis):
                                 if self.alias.is_alias(var.name, in_var,
                                                        instr.instr_index):
                                     self.update_reporter(instr, var, IN_wip,
-                                                         "double_free", True)
+                                                         "use-after-free", True)
                 elif instr_src.operation.name == "HLIL_CALL":
                     # rhs is a call instruction
                     instr = cast(binaryninja.highlevelil.HighLevelILCall, instr)
-                    IN_wip = self.handle_call(instr_src, IN_wip)
+                    if instr_dest.operation.name == "HLIL_VAR":
+                        # add instr_dest to IN_wip if callee return free'd ptr
+                        instr_dest_var = instr_dest.var
+                        IN_wip = self.handle_call(instr_src, IN_wip, instr_dest_var)
+                    else:
+                        IN_wip = self.handle_call(instr_src, IN_wip)
                 # handle instr_dest
                 if instr_dest.operation.name == "HLIL_VAR":
                     instr_dest_var = instr_dest.var
@@ -98,7 +107,8 @@ class VulnsDetector(core.FlowAnalysis):
 
     def handle_call(
             self, instr: binaryninja.highlevelil.HighLevelILCall,
-            IN_wip: Dict[str, set[int]]
+            IN_wip: Dict[str, set[int]],
+            dest_var: Optional[binaryninja.variable.Variable] = None
     ) -> Dict[str, set[int]]:
         if self.is_free(instr):
             # callee is free()
@@ -111,28 +121,43 @@ class VulnsDetector(core.FlowAnalysis):
             free_var: binaryninja.variable.Variable = instr_param.var
             self.update_args_free_sum(free_var)
             if free_var.name in IN_wip.keys():
-                self.update_reporter(instr, free_var, IN_wip, "double_free")
+                self.update_reporter(instr, free_var, IN_wip, "double-free")
             elif len(IN_wip) != 0:
                 # alias query of free_var with each dataflow fact in IN_wip
                 for in_var in IN_wip.keys():
                     if self.alias.is_alias(free_var.name, in_var,
                                            instr.instr_index):
                         self.update_reporter(instr, free_var, IN_wip,
-                                             "double_free", True)
+                                             "double-free", True)
 
             # create a new copy so previously assigned
             # unitTo{Before,After}Flow are not affected
             IN_wip = deepcopy(IN_wip)
-            self.update_IN(instr, free_var, IN_wip)
+            self.gen_IN(instr, free_var, IN_wip)
         else:
             # other calls
-            self.handle_other_call(instr, IN_wip)
+            IN_wip = self.handle_other_call(instr, IN_wip, dest_var)
         return IN_wip
 
     def handle_other_call(
             self, instr: binaryninja.highlevelil.HighLevelILCall,
-            IN_wip: Dict[str, set[int]]
-    ) -> None:
+            IN_wip: Dict[str, set[int]],
+            dest_var: Optional[binaryninja.variable.Variable] = None
+    ) -> Dict[str, set[int]]:
+        #
+        callee_addr = instr.dest.value.value
+        callee_func = self.bv.get_function_at(callee_addr)
+        if callee_func in self.func_summaries:
+            callee_sum: Summary = self.func_summaries[callee_func]
+            if dest_var is not None and callee_sum.ret_free:
+                self.gen_IN(instr, dest_var, IN_wip)
+            if callee_func is not None:
+                callee_params = callee_func.parameter_vars.vars
+                for i, arg_is_free in enumerate(callee_sum.args_free):
+                    if arg_is_free:
+                        self.gen_IN(instr, callee_params[i], IN_wip)
+
+        # over-approximate. If IN_wip overlaps with params, alert
         for param in instr.params:
             param = cast(binaryninja.highlevelil.HighLevelILVar, param)
             if param.operation.name != "HLIL_VAR":
@@ -149,7 +174,9 @@ class VulnsDetector(core.FlowAnalysis):
                     if self.alias.is_alias(param.var.name, in_var,
                                            instr.instr_index):
                         self.update_reporter(instr, param.var, IN_wip,
-                                             "double_free", True)
+                                             "use-after-free", True)
+
+        return IN_wip
 
     def update_args_use_sum(self, _var: binaryninja.variable.Variable) -> None:
         if _var in self.args:
@@ -191,7 +218,7 @@ class VulnsDetector(core.FlowAnalysis):
         return False
 
     @staticmethod
-    def update_IN(
+    def gen_IN(
             instr: binaryninja.highlevelil.HighLevelILInstruction,
             var: binaryninja.variable.Variable, IN: Dict[str, set[int]]
     ) -> None:
@@ -285,7 +312,7 @@ def main(filepath, output_dir):
         # if func.name != "Java_com_example_hellolibs_NativeCall_echoJNI":
         #     continue
         print(f"    func({hex(func.start)}): {func.name}")
-        vulns = VulnsDetector(func, dangling_creators)
+        vulns = VulnsDetector(func, bv, dangling_creators)
         # breakpoint()
         # output vulns identified
         if len(vulns.reporter) != 0:

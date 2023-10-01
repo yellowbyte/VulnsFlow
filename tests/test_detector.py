@@ -10,7 +10,7 @@ def test_libhello_libs(tmpdir):
     output_file = os.path.join(folder, "libhello_libs.so.mono")
     expected = {
         "use-after-free,Java_com_example_hellolibs_NativeCall_echoJNI,9,0xc1c\n",
-        "double_free,Java_com_example_hellolibs_NativeCall_echoJNI,13,0xc54\n",
+        "double-free,Java_com_example_hellolibs_NativeCall_echoJNI,13,0xc54\n",
     }
     assert os.path.exists(output_file)
     with open(output_file, "r") as f:
@@ -26,7 +26,7 @@ def test_libhello_libs1(tmpdir):
     detector.main(filepath, folder)
     output_file = os.path.join(folder, "libhello_libs1.so.mono")
     expected = {
-        "double_free,Java_com_example_hellolibs_NativeCall_echoJNI,12,0xbf0\n",
+        "double-free,Java_com_example_hellolibs_NativeCall_echoJNI,12,0xbf0\n",
         "use-after-free,Java_com_example_hellolibs_NativeCall_echoJNI,8,0xbbc\n",
     }
     assert os.path.exists(output_file)
@@ -43,7 +43,7 @@ def test_libhello_libs2(tmpdir):
     detector.main(filepath, folder)
     output_file = os.path.join(folder, "libhello_libs2.so.mono")
     expected = {
-        "double_free,Java_com_example_hellolibs_NativeCall_echoJNI,15,0xc04\n",
+        "double-free,Java_com_example_hellolibs_NativeCall_echoJNI,15,0xc04\n",
     }
     assert os.path.exists(output_file)
     with open(output_file, "r") as f:
@@ -59,7 +59,7 @@ def test_need_alias(tmpdir):
     detector.main(filepath, folder)
     output_file = os.path.join(folder, "need_alias.out.mono")
     expected = {
-        "double_free,_main,12,0x100003f6c\n",
+        "double-free,_main,12,0x100003f6c\n",
     }
     assert os.path.exists(output_file)
     with open(output_file, "r") as f:
@@ -75,7 +75,7 @@ def test_cpp1(tmpdir):
     detector.main(filepath, folder)
     output_file = os.path.join(folder, "cpp1.out.mono")
     expected = {
-        "double_free,_main,82,0x100003088\n",
+        "double-free,_main,82,0x100003088\n",
     }
     assert os.path.exists(output_file)
     with open(output_file, "r") as f:
