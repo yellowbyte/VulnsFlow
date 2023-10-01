@@ -87,12 +87,9 @@ class VulnsDetector(core.FlowAnalysis):
                             instr_dest_var in IN_wip.keys() and
                             instr_src.operation.name != "HLIL_CALL"
                     ):
-                        # TODO: fix this part when considering program summaries
-                        # TODO: since the callee can either kill or keep the
-                        # TODO: dangling pointer
                         # KILL the var
                         # lhs is a dataflow fact that is overwritten
-                        del IN_wip[instr_dest_var]
+                        del IN_wip[instr_dest_var.name]
             elif instr.operation.name == "HLIL_RET":
                 # check return instruction for summary
                 # update self.ret_free_sum if return value in IN_wip
@@ -146,8 +143,15 @@ class VulnsDetector(core.FlowAnalysis):
         callee_func = self.bv.get_function_at(callee_addr)
         if callee_func in self.func_summaries:
             callee_sum: Summary = self.func_summaries[callee_func]
-            if dest_var is not None and callee_sum.ret_free:
-                self.gen_IN(instr, dest_var, IN_wip)
+            if dest_var is not None:
+                if callee_sum.ret_free:
+                    self.gen_IN(instr, dest_var, IN_wip)
+                else:
+                    # kill dest_var if it is in IN_wip since it is not free'd by callee
+                    if dest_var in IN_wip.keys():
+                        # since the callee can either kill or keep the
+                        # dangling pointer
+                        del IN_wip[dest_var.name]
             if callee_func is not None:
                 callee_params = callee_func.parameter_vars.vars
                 for i, arg_is_free in enumerate(callee_sum.args_free):
