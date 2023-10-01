@@ -49,33 +49,39 @@ class VulnsDetector(core.FlowAnalysis):
             ):
                 instr = cast(binaryninja.highlevelil.HighLevelILCall, instr)
                 IN_wip = self.handle_call(instr, IN_wip)
-            elif instr.operation.name == "HLIL_ASSIGN":
+            elif (
+                    instr.operation.name == "HLIL_ASSIGN" or
+                    instr.operation.name == "HLIL_VAR_INIT"
+            ):
+                isAssign = False
+                # instr_dest is a var for HLIL_VAR_INIT
+                # but a HLIL_Instruction for HILIL_Assign
+                if instr.operation.name == "HLIL_ASSIGN":
+                    isAssign = True
                 instr_src = instr.src
                 instr_dest = instr.dest
                 # handle instr_src
                 if instr_src.operation.name == "HLIL_DEREF":
                     for var in instr_src.vars:
                         self.update_args_use_sum(var)
-                        if var.name in IN_wip.keys():
-                            self.update_reporter(instr, var, IN_wip, "use-after-free")
-                        elif len(IN_wip) != 0:
-                            # alias query of free_var with each dataflow fact in IN_wip
-                            for in_var in IN_wip.keys():
-                                if self.alias.is_alias(var.name, in_var,
-                                                       instr.instr_index):
-                                    self.update_reporter(instr, var, IN_wip,
-                                                         "use-after-free", True)
+                        self.check_reporter(instr, var, IN_wip, "use-after-free")
                 elif instr_src.operation.name == "HLIL_CALL":
                     # rhs is a call instruction
                     instr = cast(binaryninja.highlevelil.HighLevelILCall, instr)
-                    if instr_dest.operation.name == "HLIL_VAR":
-                        # add instr_dest to IN_wip if callee return free'd ptr
-                        instr_dest_var = instr_dest.var
+                    instr_dest_var = None
+                    if isinstance(instr_dest, binaryninja.highlevelil.HighLevelILVar):
+                        if instr_dest.operation.name == "HLIL_VAR":
+                            # add instr_dest to IN_wip if callee return free'd ptr
+                            instr_dest_var = instr_dest.var
+                    elif isinstance(instr_dest, binaryninja.variable.Variable):
+                        instr_dest_var = instr_dest
+
+                    if instr_dest_var is not None:
                         IN_wip = self.handle_call(instr_src, IN_wip, instr_dest_var)
                     else:
                         IN_wip = self.handle_call(instr_src, IN_wip)
                 # handle instr_dest
-                if instr_dest.operation.name == "HLIL_VAR":
+                if isAssign and instr_dest.operation.name == "HLIL_VAR":
                     instr_dest_var = instr_dest.var
                     if (
                             instr_dest_var in IN_wip.keys() and
@@ -120,15 +126,7 @@ class VulnsDetector(core.FlowAnalysis):
             )
             free_var: binaryninja.variable.Variable = instr_param.var
             self.update_args_free_sum(free_var)
-            if free_var.name in IN_wip.keys():
-                self.update_reporter(instr, free_var, IN_wip, "double-free")
-            elif len(IN_wip) != 0:
-                # alias query of free_var with each dataflow fact in IN_wip
-                for in_var in IN_wip.keys():
-                    if self.alias.is_alias(free_var.name, in_var,
-                                           instr.instr_index):
-                        self.update_reporter(instr, free_var, IN_wip,
-                                             "double-free", True)
+            self.check_reporter(instr, free_var, IN_wip, "double-free")
 
             # create a new copy so previously assigned
             # unitTo{Before,After}Flow are not affected
@@ -144,7 +142,6 @@ class VulnsDetector(core.FlowAnalysis):
             IN_wip: Dict[str, set[int]],
             dest_var: Optional[binaryninja.variable.Variable] = None
     ) -> Dict[str, set[int]]:
-        #
         callee_addr = instr.dest.value.value
         callee_func = self.bv.get_function_at(callee_addr)
         if callee_func in self.func_summaries:
@@ -156,6 +153,8 @@ class VulnsDetector(core.FlowAnalysis):
                 for i, arg_is_free in enumerate(callee_sum.args_free):
                     if arg_is_free:
                         self.gen_IN(instr, callee_params[i], IN_wip)
+                        self.check_reporter(instr, callee_params[i],
+                                            IN_wip, "double-free")
 
         # over-approximate. If IN_wip overlaps with params, alert
         for param in instr.params:
@@ -163,18 +162,7 @@ class VulnsDetector(core.FlowAnalysis):
             if param.operation.name != "HLIL_VAR":
                 continue
             self.update_args_use_sum(param.var)
-            if param.var.name in IN_wip.keys():
-                # param is free'd already
-                self.update_reporter(instr, param.var, IN_wip,
-                                     "use-after-free")
-            elif len(IN_wip) != 0:
-                # alias query of free_var with each dataflow fact in IN_wip
-                # check if param's alias is free'd already
-                for in_var in IN_wip.keys():
-                    if self.alias.is_alias(param.var.name, in_var,
-                                           instr.instr_index):
-                        self.update_reporter(instr, param.var, IN_wip,
-                                             "use-after-free", True)
+            self.check_reporter(instr, param.var, IN_wip, "use-after-free")
 
         return IN_wip
 
@@ -240,6 +228,17 @@ class VulnsDetector(core.FlowAnalysis):
         out2 = deepcopy(in2)
         # MAY analysis
         return out1 | out2
+
+    def check_reporter(self, instr, _var, IN, alert):
+        if _var.name in IN.keys():
+            self.update_reporter(instr, _var, IN, alert)
+        elif len(IN) != 0:
+            # alias query of free_var with each dataflow fact in IN_wip
+            for in_var in IN.keys():
+                if self.alias.is_alias(_var.name, in_var,
+                                       instr.instr_index):
+                    self.update_reporter(instr, _var, IN,
+                                         alert, True)
 
     def update_reporter(
             self, instr: binaryninja.highlevelil.HighLevelILInstruction,
@@ -313,7 +312,7 @@ def main(filepath, output_dir):
         #     continue
         print(f"    func({hex(func.start)}): {func.name}")
         vulns = VulnsDetector(func, bv, dangling_creators)
-        # breakpoint()
+#        breakpoint()
         # output vulns identified
         if len(vulns.reporter) != 0:
             # breakpoint()
