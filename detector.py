@@ -23,9 +23,9 @@ class VulnsDetector(core.FlowAnalysis):
         self.reporter: list = list()
         # list of binaryninja.variable.Variable
         self.args: list[binaryninja.variable.Variable] = self.method.parameter_vars.vars
-        self.args_use_sum: list[bool] = [False] * len(self.args)   # False: none, True: use
-        self.args_free_sum: list[bool] = [False] * len(self.args)  # False: none, True: free
-        self.ret_free_sum: bool = False  # False: none, True: free
+        self.args_use_sum: list[bool] = [False] * len(self.args)   # F: none, T: use
+        self.args_free_sum: list[bool] = [False] * len(self.args)  # F: none, T: free
+        self.ret_free_sum: bool = False  # F: none, T: free
         super().__init__(method.hlil, "forward")
         VulnsDetector.func_summaries[method] = Summary(
             self.args_use_sum,
@@ -88,7 +88,7 @@ class VulnsDetector(core.FlowAnalysis):
                         if self.is_free(instr_src):
                             self.ret_free_sum = True
                         instr = cast(binaryninja.highlevelil.HighLevelILCall,
-                                            instr)
+                                     instr)
                         IN_wip = self.handle_call(instr_src, IN_wip)
 
             self.unitToAfterFlow[instr.instr_index] = IN_wip
