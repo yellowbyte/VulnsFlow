@@ -52,6 +52,7 @@ class Callgraph:
                     if sym.address == function.start:
                         # still user-defined functions although in symbol table
                         return True
+            return False
         # not in symbol table
         # user-defined
         return True

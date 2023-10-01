@@ -7,7 +7,8 @@ import binaryninja
 import click
 import os
 
-Summary = namedtuple("Summary", ["args_free", "args_use", "ret_free"])
+
+Summary = namedtuple("Summary", ["args_use", "args_free", "ret_free"])
 
 
 class VulnsDetector(core.FlowAnalysis):
@@ -19,7 +20,17 @@ class VulnsDetector(core.FlowAnalysis):
         self.alias = core.MayAlias(method)
         # self.alias = core.DefaultAlias()
         self.reporter = list()
+        # list of binaryninja.variable.Variable
+        self.args = self.method.parameter_vars.vars
+        self.args_use_sum = [False] * len(self.args)   # False: none, True: use
+        self.args_free_sum = [False] * len(self.args)  # False: none, True: free
+        self.ret_free_sum = False  # False: none, True: free
         super().__init__(method.hlil, "forward")
+        VulnsDetector.func_summaries[method] = Summary(
+            self.args_use_sum,
+            self.args_free_sum,
+            self.ret_free_sum
+        )
 
     def flow_through(self, bb, IN):
         """Fact-affecting flow functions for UAF and DF detections"""
@@ -31,44 +42,14 @@ class VulnsDetector(core.FlowAnalysis):
                     instr.dest.value.type.name == "ConstantPointerValue"
             ):
                 # callee is explicit
-                callee_addr = instr.dest.value.value
-                callee_name = str(instr.dest)
-                if (
-                        callee_addr in self.deallocation_methods.values() or
-                        callee_name == "operator delete[]" or
-                        callee_name == "operator delete"
-                ):
-                    # callee is heap deallocation: free, delete, delete[]
-                    if (
-                            len(instr.params) != 1 or
-                            instr.params[0].operation.name != "HLIL_VAR"
-                    ):
-                        continue
-                    # callee is free()
-                    free_var = instr.params[0].var
-                    if free_var.name in IN_wip.keys():
-                        self.update_reporter(instr, free_var, IN_wip, "double_free")
-                    elif len(IN_wip) != 0:
-                        # alias query of free_var with each dataflow fact in IN_wip
-                        for in_var in IN_wip.keys():
-                            if self.alias.is_alias(free_var.name, in_var,
-                                                   instr.instr_index):
-                                self.update_reporter(instr, free_var, IN_wip,
-                                                     "double_free", True)
-
-                    # create a new copy so previously assigned
-                    # unitTo{Before,After}Flow are not affected
-                    IN_wip = deepcopy(IN_wip)
-                    self.update_IN(instr, free_var, IN_wip)
-                else:
-                    # other calls
-                    self.handle_params(instr, IN_wip)
-
+                IN_wip = self.handle_call(instr, IN_wip)
             elif instr.operation.name == "HLIL_ASSIGN":
                 instr_src = instr.src
                 instr_dest = instr.dest
+                # handle instr_src
                 if instr_src.operation.name == "HLIL_DEREF":
                     for var in instr_src.vars:
+                        self.update_args_use_sum(var)
                         if var.name in IN_wip.keys():
                             self.update_reporter(instr, var, IN_wip, "use-after-free")
                         elif len(IN_wip) != 0:
@@ -80,8 +61,8 @@ class VulnsDetector(core.FlowAnalysis):
                                                          "double_free", True)
                 elif instr_src.operation.name == "HLIL_CALL":
                     # rhs is a call instruction
-                    self.handle_params(instr_src, IN_wip)
-
+                    IN_wip = self.handle_call(instr_src, IN_wip)
+                # handle instr_dest
                 if instr_dest.operation.name == "HLIL_VAR":
                     instr_dest_var = instr_dest.var
                     if (
@@ -94,15 +75,60 @@ class VulnsDetector(core.FlowAnalysis):
                         # KILL the var
                         # lhs is a dataflow fact that is overwritten
                         del IN_wip[instr_dest_var]
+            elif instr.operation.name == "HLIL_RET":
+                # check return instruction for summary
+                self.update_ret_free_sum(instr, IN_wip)
+                if len(instr.src) == 1:
+                    instr_src = instr.src[0]
+                    if instr_src.operation.name == "HLIL_CALL":
+                        IN_wip = self.handle_call(instr_src, IN_wip)
+
             self.unitToAfterFlow[instr.instr_index] = IN_wip
 
         OUT = IN_wip
         return OUT
 
-    def handle_params(self, instr, IN_wip):
+    def handle_call(self, instr, IN_wip):
+        callee_addr = instr.dest.value.value
+        callee_name = str(instr.dest)
+        if (
+                callee_addr in self.deallocation_methods.values() or
+                callee_name == "operator delete[]" or
+                callee_name == "operator delete"
+        ):
+            # callee is heap deallocation: free, delete, delete[]
+            if (
+                    len(instr.params) != 1 or
+                    instr.params[0].operation.name != "HLIL_VAR"
+            ):
+                return
+            # callee is free()
+            free_var = instr.params[0].var
+            self.update_args_free_sum(free_var)
+            if free_var.name in IN_wip.keys():
+                self.update_reporter(instr, free_var, IN_wip, "double_free")
+            elif len(IN_wip) != 0:
+                # alias query of free_var with each dataflow fact in IN_wip
+                for in_var in IN_wip.keys():
+                    if self.alias.is_alias(free_var.name, in_var,
+                                           instr.instr_index):
+                        self.update_reporter(instr, free_var, IN_wip,
+                                             "double_free", True)
+
+            # create a new copy so previously assigned
+            # unitTo{Before,After}Flow are not affected
+            IN_wip = deepcopy(IN_wip)
+            self.update_IN(instr, free_var, IN_wip)
+        else:
+            # other calls
+            self.handle_other_call(instr, IN_wip)
+        return IN_wip
+
+    def handle_other_call(self, instr, IN_wip):
         for param in instr.params:
             if param.operation.name != "HLIL_VAR":
                 continue
+            self.update_args_use_sum(param.var)
             if param.var.name in IN_wip.keys():
                 # param is free'd already
                 self.update_reporter(instr, param.var, IN_wip,
@@ -115,6 +141,24 @@ class VulnsDetector(core.FlowAnalysis):
                                            instr.instr_index):
                         self.update_reporter(instr, param.var, IN_wip,
                                              "double_free", True)
+
+    def update_args_use_sum(self, _var):
+        if _var in self.args:
+            arg_index = self.args.index(_var)
+            self.args_use_sum[arg_index] = True
+
+    def update_args_free_sum(self, _var):
+        if _var in self.args:
+            arg_index = self.args.index(_var)
+            self.args_free_sum[arg_index] = True
+
+    def update_ret_free_sum(self, instr, IN_wip):
+        for var in instr.vars:
+            if var.name in IN_wip.keys():
+                # return value is free'd
+                self.ret_free_sum = True
+                return
+        return
 
     @staticmethod
     def update_IN(instr, var, IN):
@@ -161,20 +205,18 @@ def get_danglers(bv):
     # identify free from symbol table
     # if not in symbol table, the binary does not call free anywhere
     dangling_creators = dict()
-    free_sym = "free"
-    if free_sym not in bv.symbols:
-        free_sym = "_free"
-        if free_sym not in bv.symbols:
-            free_sym = None
-    if free_sym:
-        # identify the imported function address for free
-        free = bv.symbols[free_sym]
-        free_addr = None
-        for sym in free:
-            if sym.type.name == "ImportedFunctionSymbol":
-                free_addr = sym.address
-                break
-        dangling_creators["free"] = free_addr
+    free_syms = ["free", "_free"]
+
+    for free_sym in free_syms:
+        if free_sym in bv.symbols:
+            # identify the imported function address for free
+            free = bv.symbols[free_sym]
+            free_addr = None
+            for sym in free:
+                if sym.type.name == "ImportedFunctionSymbol":
+                    free_addr = sym.address
+                    break
+            dangling_creators[free_sym] = free_addr
     return dangling_creators
 
 
@@ -200,10 +242,11 @@ def main(filepath, output_dir):
     cg = core.Callgraph(bv)
     rto = core.rto_traversal(cg)
     for func in rto:
-        #        if func.name != "_main":
-        #            continue
+        # if func.name != "Java_com_example_hellolibs_NativeCall_echoJNI":
+        #     continue
         print(f"    func({hex(func.start)}): {func.name}")
         vulns = VulnsDetector(func, dangling_creators)
+        breakpoint()
         # output vulns identified
         if len(vulns.reporter) != 0:
             # breakpoint()
