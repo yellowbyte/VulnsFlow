@@ -3,8 +3,8 @@
 
 
 int* callee() {
-    int* ptr = (int*) malloc(sizeof(int));
-    int* ptr2 = ptr;
+    char* ptr = (int*) malloc(sizeof(int));
+    char* ptr2 = ptr;
     int c = getchar();
     free(ptr);
     int e = getchar();
@@ -15,12 +15,12 @@ int* callee() {
 int main() {
 
     int c = getchar();
-    int* ptr2;
+    char* ptr2;
     if (c == 65) {
-        ptr2 = (int*) malloc(sizeof(int)); 
+        ptr2 = (char*) malloc(sizeof(int)); 
     }
 
-    int* cptr = callee(ptr2);
+    char* cptr = callee(ptr2);
     free(ptr2);
     free(cptr);
 
