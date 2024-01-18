@@ -10,6 +10,7 @@ mypy detector.py
 Implemented
 -----------
 * flow-sensitive alias analysis 
+  * [alias analysis with data flow](https://www.cs.cornell.edu/courses/cs6120/2020fa/lesson/9/)
 * use-after-free
 * double free
 
