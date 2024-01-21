@@ -14,8 +14,8 @@ Implemented
 * use-after-free
 * double free
 
-TBD
----
+To Implement
+------------
 * null-pointer dereference 
   * Precise Interprocedural Dataflow Analysis via Graph Reachability
   * A Single-Machine Disk-Based Graph Sys- tem for Interprocedural Static Analyses of Large-Scale Systems Code
@@ -30,3 +30,8 @@ TBD
   * Scaling JavaScript Abstract Interpretation to Detect and Exploit Node.js Taint-style Vulnerability
 * path traversal
   * Scaling JavaScript Abstract Interpretation to Detect and Exploit Node.js Taint-style Vulnerability
+
+TODOs
+-----
+* reachability analysis for automatic exploits generation
+
