@@ -35,3 +35,7 @@ TODOs
 -----
 * reachability analysis for automatic exploits generation
 
+MISCs
+-----
+From "Faster and Better: Detecting Vulnerabilities in Linux-based IoT Firmware with Optimized Reaching Definition Analysis":
+![common firmware sinks for taint analysis](pics/binsinks.png)
